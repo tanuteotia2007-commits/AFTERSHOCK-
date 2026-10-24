@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AFTERSHOCK | Reliability Lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #10131b; color: #edf0f8; }
+    [hidden] { display: none !important; }
+    body { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
+    h1, h2, p { margin-top: 0; }
+    header { border-bottom: 1px solid #303746; margin-bottom: 24px; padding-bottom: 20px; }
+    header p, .muted { color: #a7b0c2; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    section, .panel { background: #191e29; border: 1px solid #303746; border-radius: 12px; padding: 18px; }
+    label { display: block; margin: 12px 0 6px; color: #bdc6d7; }
+    input, select, button { box-sizing: border-box; width: 100%; border-radius: 7px; padding: 10px 12px; font: inherit; }
+    input, select { background: #10131b; color: inherit; border: 1px solid #414b5d; }
+    button { margin-top: 14px; border: 0; background: #8f73ff; color: #10131b; font-weight: 700; cursor: pointer; }
+    button:hover { background: #aa96ff; }
+    button.secondary { background: #303746; color: #edf0f8; text-align: left; margin-top: 8px; }
+    .stats { display: flex; gap: 24px; flex-wrap: wrap; margin: 20px 0; }
+    .stat strong { display: block; font-size: 1.4rem; }
+    .status { min-height: 1.5em; color: #a7b0c2; }
+    .pass { color: #7fe0ae; }
+    .fail { color: #ff938d; }
+    .finding { border-left: 3px solid #ff938d; margin: 10px 0; padding: 8px 12px; background: #24202a; }
+    .finding strong { display: block; }
+    ol { padding-left: 24px; }
+    li { margin: 8px 0; }
+    code, pre { font-family: ui-monospace, monospace; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #10131b; border-radius: 7px; padding: 12px; }
+    @media (max-width: 600px) { body { padding: 20px 12px 40px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AFTERSHOCK</h1>
+    <p>Local reliability lab — simulated mock services and optional real Agentverse agent messages.</p>
+    <p id="session-status" class="muted"></p>
+    <div id="dashboard-stats" class="stats" aria-live="polite" hidden>
+      <div class="stat"><strong id="agent-count">0</strong>registered agents</div>
+      <div class="stat"><strong id="run-count">0</strong>saved runs</div>
+      <div class="stat"><strong id="simulated-count">0</strong>simulated mock runs</div>
+      <div class="stat"><strong id="real-count">0</strong>real-agent runs</div>
+      <div class="stat"><strong id="simulated-pass-rate">—</strong>simulated pass rate</div>
+      <div class="stat"><strong id="real-reply-rate">—</strong>real-agent reply rate</div>
+    </div>
+  </header>
+
+  <main id="auth-panel">
+    <section>
+      <h2 id="auth-title">Sign in</h2>
+      <p class="muted">Create a local account to keep your agents and test history private.</p>
+      <form id="auth-form">
+        <label for="auth-username">Username</label>
+        <input id="auth-username" name="username" minlength="3" maxlength="80" autocomplete="username" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" minlength="12" maxlength="256" autocomplete="current-password" required>
+        <button id="auth-submit" type="submit">Sign in</button>
+      </form>
+      <button id="auth-toggle" class="secondary" type="button">Create an account</button>
+      <p id="auth-message" class="status" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <main id="dashboard" hidden>
+    <div class="stats">
+      <button id="sign-out" class="secondary" type="button">Sign out</button>
+    </div>
+    <div class="grid">
+      <section>
+        <h2>Register an agent</h2>
+        <form id="register-form">
+          <label for="agent-name">Display name</label>
+          <input id="agent-name" name="name" maxlength="80" value="Timeout demo (naive)" required>
+          <label for="agent-kind">Agent type</label>
+          <select id="agent-kind" name="kind">
+            <option value="naive">Naive order agent (intentionally buggy)</option>
+            <option value="resilient">Resilient order agent</option>
+            <option value="agentverse">Agentverse agent (real hosted agent)</option>
+          </select>
+          <button type="submit">Register agent</button>
+        </form>
+      </section>
+
+      <section>
+        <h2 id="run-title">Run timeout scenario</h2>
+        <p id="run-help" class="muted">Payments applies the first charge, then times out. The naive agent retries immediately.</p>
+        <label for="run-agent">Registered agent</label>
+        <select id="run-agent"></select>
+        <div id="mock-controls">
+          <p class="muted">This scenario uses simulated inventory and payment services. Edit the validated JSON below.</p>
+          <label for="scenario-json">Scenario JSON</label>
+          <textarea id="scenario-json" rows="10" spellcheck="false" style="width:100%;background:#10131b;color:inherit;border:1px solid #414b5d;border-radius:7px;padding:10px;font:inherit"></textarea>
+          <button id="save-scenario" class="secondary" type="button">Save scenario</button>
+          <label for="saved-scenarios">Saved scenarios</label>
+          <select id="saved-scenarios"><option value="">Choose a saved scenario</option></select>
+        </div>
+        <div id="agentverse-controls" hidden>
+          <label for="agentverse-message">Message to the hosted agent</label>
+          <input id="agentverse-message" maxlength="2000" value="Hello, please introduce yourself.">
+          <label for="agentverse-fault">Message-level fault injection</label>
+          <select id="agentverse-fault">
+            <option value="none">No fault (send a real message)</option>
+            <option value="delayed_reply">Delay reply by 1 second</option>
+            <option value="dropped_message">Drop message (do not send)</option>
+            <option value="duplicated_message">Send duplicate message (two real sends)</option>
+            <option value="malformed_payload">Send malformed chat payload</option>
+          </select>
+          <p class="muted">Duplicate sends may repeat actions performed by your real agent. Malformed payload sends invalid JSON inside a signed message envelope.</p>
+        </div>
+        <button id="run-button" type="button">Run failure scenario</button>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <section style="margin-top:16px">
+      <h2>Replay, fixes, and verification</h2>
+      <p class="muted">Replay and verification run only against local simulated agents. Fixes are rule-based hypotheses; they never edit agent code.</p>
+      <div class="grid">
+        <button id="replay-button" type="button" disabled>Replay this simulated run</button>
+        <button id="fix-button" type="button" disabled>Generate fix hypotheses</button>
+        <div>
+          <label for="verify-candidate">Candidate mock implementation</label>
+          <select id="verify-candidate" disabled>
+            <option value="resilient">Resilient order agent</option>
+            <option value="naive">Naive order agent</option>
+          </select>
+          <button id="verify-button" type="button" disabled>Approve and run verification</button>
+        </div>
+      </div>
+      <div id="analysis-results"></div>
+    </section>
+
+    <div class="grid" style="margin-top:16px">
+      <section>
+        <h2>Registered agents</h2>
+        <ul id="agent-list"></ul>
+      </section>
+      <section>
+        <h2>Recent runs</h2>
+        <div id="run-list"></div>
+      </section>
+    </div>
+
+    <section style="margin-top:16px">
+      <h2>Run result and evidence</h2>
+      <div id="run-detail" class="muted">Register an agent and run a test to see persisted evidence.</div>
+    </section>
+  </main>
+
+  <script>
+    const timeoutScenario = {
+      name: "payment-timeout-after-charge",
+      faults: [{
+        type: "timeout",
+        target: "payments.charge",
+        on_call: 1,
+        params: { effect_applied: true }
+      }],
+      task: { order_id: "timeout-demo-order", skus: ["sku-a", "sku-b"], amount: 4999 },
+      seed: 7
+    };
+
+    const statusElement = document.getElementById("status");
+    const agentSelect = document.getElementById("run-agent");
+    const agentList = document.getElementById("agent-list");
+    const runList = document.getElementById("run-list");
+    const detail = document.getElementById("run-detail");
+    const runButton = document.getElementById("run-button");
+    let authMode = "login";
+    let currentRunId = null;
+
+    document.getElementById("scenario-json").value = JSON.stringify(timeoutScenario, null, 2);
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { "Content-Type": "application/json", ...options.headers }
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+      return body;
+    }
+
+    function showAuth(message = "") {
+      document.getElementById("auth-panel").hidden = false;
+      document.getElementById("dashboard").hidden = true;
+      document.getElementById("dashboard-stats").hidden = true;
+      document.getElementById("session-status").textContent = "";
+      document.getElementById("auth-message").textContent = message;
+      authMode = "login";
+      document.getElementById("auth-title").textContent = "Sign in";
+      document.getElementById("auth-submit").textContent = "Sign in";
+      document.getElementById("auth-toggle").textContent = "Create an account";
+      document.getElementById("auth-password").autocomplete = "current-password";
+      currentRunId = null;
+      detail.dataset.runId = "";
+      detail.replaceChildren();
+      addText(detail, "p", "Sign in and run a test to see persisted evidence.", "muted");
+      document.getElementById("analysis-results").replaceChildren();
+      document.getElementById("agent-list").replaceChildren();
+      document.getElementById("run-list").replaceChildren();
+      agentSelect.replaceChildren();
+      document.getElementById("saved-scenarios").replaceChildren();
+      document.getElementById("register-form").reset();
+      document.getElementById("scenario-json").value = JSON.stringify(timeoutScenario, null, 2);
+      document.getElementById("agentverse-message").value = "Hello, please introduce yourself.";
+      document.getElementById("agentverse-fault").value = "none";
+      statusElement.textContent = "";
+      for (const id of ["agent-count", "run-count", "simulated-count", "real-count"]) {
+        document.getElementById(id).textContent = "0";
+      }
+      for (const id of ["simulated-pass-rate", "real-reply-rate"]) {
+        document.getElementById(id).textContent = "—";
+      }
+      for (const id of ["replay-button", "fix-button", "verify-button", "verify-candidate"]) {
+        document.getElementById(id).disabled = true;
+      }
+    }
+
+    async function showDashboard(user) {
+      document.getElementById("auth-panel").hidden = true;
+      document.getElementById("dashboard").hidden = false;
+      document.getElementById("dashboard-stats").hidden = false;
+      document.getElementById("session-status").textContent = `Signed in as ${user.username}`;
+      await refresh();
+    }
+
+    function showError(error) {
+      statusElement.textContent = error.message;
+      statusElement.className = "status fail";
+    }
+
+    function addText(parent, tag, text, className) {
+      const element = document.createElement(tag);
+      element.textContent = text;
+      if (className) element.className = className;
+      parent.append(element);
+      return element;
+    }
+
+    async function showRun(runId) {
+      const { run } = await api(`/api/runs/${runId}`);
+      detail.replaceChildren();
+      detail.dataset.runId = String(runId);
+      currentRunId = runId;
+      const isReal = run.execution_type.startsWith("REAL AGENT");
+      const canAnalyze = currentRunId !== null;
+      for (const id of ["replay-button", "verify-button", "verify-candidate"]) {
+        document.getElementById(id).disabled = isReal || !canAnalyze;
+      }
+      document.getElementById("fix-button").disabled = !canAnalyze;
+      document.getElementById("analysis-results").replaceChildren();
+      const heading = document.createElement("h3");
+      const outcome = isReal
+        ? run.passed ? "REPLY RECEIVED" : "NO REPLY"
+        : run.passed ? "PASSED" : "FAILED";
+      heading.textContent = `${run.scenario_name} — ${outcome}`;
+      heading.className = run.passed ? "pass" : "fail";
+      detail.append(heading);
+      addText(detail, "p", `Agent: ${run.agent_name} (${run.result.agent})`);
+      addText(detail, "p", `Execution: ${run.execution_type}`);
+      addText(detail, "p", `Fingerprint: ${run.fingerprint}`);
+
+      const findingsHeading = document.createElement("h3");
+      findingsHeading.textContent = `Findings (${run.finding_count})`;
+      detail.append(findingsHeading);
+      if (run.findings.length === 0) addText(detail, "p", "No violations found.", "pass");
+      for (const finding of run.findings) {
+        const item = document.createElement("div");
+        item.className = "finding";
+        addText(item, "strong", `${finding.severity.toUpperCase()} · ${finding.code} · ${finding.status}`);
+        addText(item, "span", finding.message);
+        detail.append(item);
+      }
+
+      const evidenceHeading = document.createElement("h3");
+      evidenceHeading.textContent = `Execution evidence (${run.result.events.length} events)`;
+      detail.append(evidenceHeading);
+      const events = document.createElement("ol");
+      for (const event of run.result.events) {
+        const item = document.createElement("li");
+        const values = Object.entries(event)
+          .filter(([key]) => key !== "seq")
+          .map(([key, value]) => `${key}=${typeof value === "object" ? JSON.stringify(value) : value}`)
+          .join(" · ");
+        item.textContent = `#${event.seq} ${values}`;
+        events.append(item);
+      }
+      detail.append(events);
+      const analysis = document.getElementById("analysis-results");
+      for (const suggestion of run.suggestions || []) {
+        addText(analysis, "p", `${suggestion.status}: ${suggestion.title} — ${suggestion.explanation}`);
+      }
+      for (const verification of run.verifications || []) {
+        addText(analysis, "p", `Verification ${verification.id}: ${verification.result.status} (${verification.result.reason})`);
+      }
+      for (const replay of run.replays || []) {
+        addText(analysis, "p", `Replay ${replay.id}: ${replay.result.identical ? "identical" : "different"} to saved execution`);
+      }
+    }
+
+    async function refresh() {
+      const { agents, runs, metrics } = await api("/api/dashboard");
+      document.getElementById("agent-count").textContent = metrics.agents_registered;
+      document.getElementById("run-count").textContent = metrics.runs_saved;
+      document.getElementById("simulated-count").textContent = metrics.simulated_runs;
+      document.getElementById("real-count").textContent = metrics.real_agent_runs;
+      document.getElementById("simulated-pass-rate").textContent =
+        metrics.simulated_pass_rate === null ? "—" : `${metrics.simulated_pass_rate}%`;
+      document.getElementById("real-reply-rate").textContent =
+        metrics.real_agent_reply_rate === null ? "—" : `${metrics.real_agent_reply_rate}%`;
+
+      agentSelect.replaceChildren();
+      agentList.replaceChildren();
+      if (agents.length === 0) {
+        addText(agentList, "li", "No agents registered yet.");
+        const option = document.createElement("option");
+        option.textContent = "Register an agent first";
+        option.value = "";
+        agentSelect.append(option);
+      }
+      for (const agent of agents) {
+        const option = document.createElement("option");
+        option.value = agent.id;
+        option.textContent = `${agent.name} — ${agent.kind}`;
+        option.dataset.kind = agent.kind;
+        agentSelect.append(option);
+        addText(agentList, "li", `${agent.name} — ${agent.label}`);
+      }
+
+      runList.replaceChildren();
+      if (runs.length === 0) addText(runList, "p", "No runs saved yet.", "muted");
+      for (const run of runs) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        const realAgent = run.execution_type.startsWith("REAL AGENT");
+        const outcome = realAgent
+          ? run.passed ? "REPLY RECEIVED" : "NO REPLY"
+          : run.passed ? "PASSED" : `FAILED (${run.violations_count})`;
+        button.textContent = `#${run.id} ${run.scenario_name} · ${run.execution_type} · ${outcome}`;
+        button.addEventListener("click", () => showRun(run.id).catch(showError));
+        runList.append(button);
+      }
+      if (runs.length > 0 && !detail.dataset.runId) await showRun(runs[0].id);
+      await refreshScenarios();
+      updateRunMode();
+    }
+
+    async function refreshScenarios() {
+      const { scenarios } = await api("/api/scenarios");
+      const select = document.getElementById("saved-scenarios");
+      select.replaceChildren();
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "Choose a saved scenario";
+      select.append(empty);
+      for (const saved of scenarios) {
+        const option = document.createElement("option");
+        option.value = saved.id;
+        option.textContent = saved.name;
+        option.dataset.scenario = JSON.stringify(saved.scenario);
+        select.append(option);
+      }
+    }
+
+    function updateRunMode() {
+      const kind = agentSelect.selectedOptions[0]?.dataset.kind;
+      const isAgentverse = kind === "agentverse";
+      document.getElementById("run-title").textContent =
+        isAgentverse ? "Message the real Agentverse agent" : "Run simulated timeout scenario";
+      document.getElementById("run-help").textContent = isAgentverse
+        ? "Sends a real chat-protocol message to the configured hosted agent. Network credentials are required."
+        : "Payments applies the first charge, then times out. The naive agent retries immediately.";
+      document.getElementById("mock-controls").hidden = isAgentverse;
+      document.getElementById("agentverse-controls").hidden = !isAgentverse;
+      runButton.textContent = isAgentverse ? "Send test to real agent" : "Run simulated failure scenario";
+    }
+
+    agentSelect.addEventListener("change", updateRunMode);
+
+    document.getElementById("saved-scenarios").addEventListener("change", event => {
+      const option = event.currentTarget.selectedOptions[0];
+      if (option?.dataset.scenario) {
+        document.getElementById("scenario-json").value =
+          JSON.stringify(JSON.parse(option.dataset.scenario), null, 2);
+      }
+    });
+
+    document.getElementById("save-scenario").addEventListener("click", async () => {
+      const statusElement = document.getElementById("status");
+      try {
+        const scenario = JSON.parse(document.getElementById("scenario-json").value);
+        const { scenario: saved } = await api("/api/scenarios", {
+          method: "POST",
+          body: JSON.stringify({ scenario })
+        });
+        statusElement.textContent = `Saved scenario "${saved.name}".`;
+        statusElement.className = "status pass";
+        await refreshScenarios();
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    document.getElementById("auth-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const formElement = event.currentTarget;
+      const message = document.getElementById("auth-message");
+      message.textContent = "";
+      try {
+        const form = new FormData(formElement);
+        const { user } = await api(`/api/auth/${authMode === "login" ? "login" : "register"}`, {
+          method: "POST",
+          body: JSON.stringify({
+            username: form.get("username"),
+            password: form.get("password")
+          })
+        });
+        formElement.reset();
+        await showDashboard(user);
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    });
+
+    document.getElementById("auth-toggle").addEventListener("click", event => {
+      authMode = authMode === "login" ? "register" : "login";
+      document.getElementById("auth-title").textContent =
+        authMode === "login" ? "Sign in" : "Create account";
+      document.getElementById("auth-submit").textContent =
+        authMode === "login" ? "Sign in" : "Create account";
+      event.currentTarget.textContent =
+        authMode === "login" ? "Create an account" : "Back to sign in";
+      document.getElementById("auth-password").autocomplete =
+        authMode === "login" ? "current-password" : "new-password";
+    });
+
+    document.getElementById("sign-out").addEventListener("click", async () => {
+      try {
+        await api("/api/auth/logout", { method: "POST", body: "{}" });
+        currentRunId = null;
+        detail.dataset.runId = "";
+        showAuth("You have signed out.");
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    document.getElementById("replay-button").addEventListener("click", async () => {
+      if (currentRunId === null) return;
+      try {
+        const { replay } = await api(`/api/runs/${currentRunId}/replay`, {
+          method: "POST",
+          body: "{}"
+        });
+        addText(
+          document.getElementById("analysis-results"),
+          "p",
+          `Replay ${replay.identical ? "matched" : "differed"} from the saved run.`
+        );
+        await showRun(currentRunId);
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    document.getElementById("fix-button").addEventListener("click", async () => {
+      if (currentRunId === null) return;
+      try {
+        await api(`/api/runs/${currentRunId}/fixes`, { method: "POST", body: "{}" });
+        await showRun(currentRunId);
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    document.getElementById("verify-button").addEventListener("click", async () => {
+      if (currentRunId === null) return;
+      try {
+        await api(`/api/runs/${currentRunId}/verify`, {
+          method: "POST",
+          body: JSON.stringify({
+            candidate_kind: document.getElementById("verify-candidate").value,
+            approved: true
+          })
+        });
+        await showRun(currentRunId);
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    document.getElementById("register-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      statusElement.textContent = "";
+      try {
+        const form = new FormData(event.currentTarget);
+        const { agent } = await api("/api/agents", {
+          method: "POST",
+          body: JSON.stringify({ name: form.get("name"), kind: form.get("kind") })
+        });
+        statusElement.textContent = `Registered ${agent.name}.`;
+        statusElement.className = "status pass";
+        await refresh();
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    document.getElementById("run-button").addEventListener("click", async () => {
+      statusElement.textContent = "";
+      if (!agentSelect.value) {
+        statusElement.textContent = "Register an agent first.";
+        return;
+      }
+      try {
+        const selectedKind = agentSelect.selectedOptions[0]?.dataset.kind;
+        let scenario;
+        try {
+          scenario = selectedKind === "agentverse"
+            ? {
+                message: document.getElementById("agentverse-message").value,
+                fault: document.getElementById("agentverse-fault").value,
+                delay_ms: 1000
+              }
+            : JSON.parse(document.getElementById("scenario-json").value);
+        } catch {
+          throw new Error("Scenario JSON is invalid.");
+        }
+        const { run } = await api("/api/runs", {
+          method: "POST",
+          body: JSON.stringify({ agent_id: Number(agentSelect.value), scenario })
+        });
+        const outcome = run.execution_type.startsWith("REAL AGENT")
+          ? run.passed ? "reply received" : "no reply"
+          : run.passed ? "passed" : "failed";
+        statusElement.textContent = `Saved run #${run.id} — ${run.execution_type} — ${outcome}.`;
+        statusElement.className = `status ${run.passed ? "pass" : "fail"}`;
+        await refresh();
+        await showRun(run.id);
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    api("/api/auth/me")
+      .then(({ user }) => showDashboard(user))
+      .catch(error => {
+        if (error.message.includes("sign in") || error.message.includes("session expired")) {
+          showAuth();
+          return;
+        }
+        showAuth(error.message);
+      });
+  </script>
+</body>
+</html>
